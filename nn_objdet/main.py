@@ -76,7 +76,18 @@ def work(input_q, output_q, path2fg, path2lab, TIME_TO_EXIT):
 
 
 def data_flow(source, input_q, output_q):
-    
+    """
+    Function for the processing of the data streams 
+
+    Args:
+        source (Str): Path to the input file
+        input_q (Queue): Input queue for the input frames
+        output_q (Queue): Output queue for the processed frames
+
+    Returns:
+        (void)
+
+    """   
     vs = cv2.VideoCapture(source)
 
     if (not vs.isOpened()):
@@ -119,6 +130,17 @@ def data_flow(source, input_q, output_q):
 
 
 def inflow_thread(input_q, vs):
+    """
+    Function to process the input stream
+
+    Args: 
+        input_q (Queue): Input queue for the input frames
+        vs (VideoCapture): Object to capture the frames
+
+    Returns:
+        void
+
+    """
     firstReadFrame = True
 
     # Initialize the counter
@@ -155,6 +177,20 @@ def inflow_thread(input_q, vs):
             f" in {tm._elapsed:0.3} s")
 
 def outflow_thread(disp, dim, outen, output_q, out):
+    """
+    Function to process the input stream
+
+    Args: 
+        disp (Bool): Flag to activate the visualization
+        dim (int): Length of the output stream
+        outen (Bool): Flag to enable the write to file
+        output_q (Queue): Output queue for the output frames
+        out: Object to write the frames
+
+    Returns:
+        void
+
+    """
     firstUsedFrame = True
     firstTreatedFrame = True
     countWriteFrame = 1
@@ -241,8 +277,7 @@ def start(args):
     data_process = Process(target=data_flow, args=(source, input_q, output_q))
     data_process.start()
     
-
-    
+ 
     ### MAIN LOOP
     data_process.join()
 
