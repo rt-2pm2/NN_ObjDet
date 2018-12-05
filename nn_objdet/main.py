@@ -13,12 +13,6 @@ import ctypes
 from classes.nn_objdetector import *
 from classes.timemeas import *
 
-# Path to frozen detection graph. This is the actual model that is used for the object detection.
-PATH_TO_CKPT = 'model/frozen_inference_graph.pb'
-
-# List of the strings that is used to add correct label for each box.
-PATH_TO_LAB = 'model/mscoco_label_map.pbtxt'
-
 TIME_TO_EXIT = Value(ctypes.c_bool, False)
 
 #### WORKING THREAD
