@@ -75,7 +75,7 @@ def work(input_q, output_q, path2fg, path2lab, TIME_TO_EXIT):
     nn_od.close_session()
 
 
-def data_flow(source, input_q, output_q):
+def data_flow(source, input_q, output_q, output_pq):
     """
     Function for the processing of the data streams 
 
@@ -89,7 +89,7 @@ def data_flow(source, input_q, output_q):
 
     """   
     vs = cv2.VideoCapture(source)
-
+ 
     if (not vs.isOpened()):
         print("Problem opening the file!")
         return
@@ -114,15 +114,21 @@ def data_flow(source, input_q, output_q):
         sys.exit()
 
     p_in = Thread(target=inflow_thread, args=(input_q, vs))
+    p_out = Thread(target=outflow_thread, args=(output_q, output_pq))
+    p_term = Thread(target=terminal_thread, args=(True, nFrame, True, output_pq, out))
+    
     p_in.start()
-
-    p_out = Thread(target=outflow_thread, args=(True, nFrame, True, output_q, out))
     p_out.start()
+    p_term.start()
 
     p_in.join()
+    print("Inflow thread terminated")
     p_out.join()
+    print("Outflow thread terminated")
+    p_term.join()
+    print("Terminal thread terminated")
    
-    print("Terminating Data Flow Process")
+    print("Terminating Data Flow Process...")
 
     # Cleaning up
     vs.release()
@@ -177,7 +183,8 @@ def inflow_thread(input_q, vs):
             f" | Ticks = {tm._nTicks:3}" +
             f" in {tm._elapsed:0.3} s")
 
-def outflow_thread(disp, dim, outen, output_q, out):
+
+def outflow_thread(output_q, output_pq):
     """
     Function to process the input stream
 
@@ -190,58 +197,86 @@ def outflow_thread(disp, dim, outen, output_q, out):
 
     Returns:
         void
-
     """
     firstUsedFrame = True
     firstTreatedFrame = True
-    countWriteFrame = 1
-
-    output_pq = queue.PriorityQueue(maxsize=3*args["queue_size"])
-
+     
     print("Outflow Thread started!\n")
 
-    tm = TimeMeas()
-    tm.start()
     while (not TIME_TO_EXIT.value):
         # If there are processed frames, otherwise block
-        outframe = output_q.get(block=True, timeout=None)
+        try:
+            #print(f"Reading queue: {output_q.qsize()}")
+            outframe = output_q.get(block=True, timeout=10)
+        except queue.Empty:
+            if (firstTreatedFrame):
+                continue
+            else:
+                # No more frames either something got stuck 
+                break
+
         #print("Output queue = " + str(output_q.qsize()))
         output_pq.put(outframe)
-
+        
         if firstTreatedFrame:
             print("Retrieving processed data...\n")
             firstTreatedFrame = False
 
-        # Check the priority queue
-        if not output_pq.empty():
-            # Extract the first tuple
-            (prior, output_frame) = output_pq.get()
-            # Check whether it is the next (maintain the order)
-            if (prior > countWriteFrame):
-                # It is out of order, put it back
-                output_pq.put((prior, output_frame))
-            else:
-                tm.tick()
-
-                countWriteFrame = countWriteFrame + 1
-                output_rgb = cv2.cvtColor(output_frame, cv2.COLOR_RGB2BGR)
-
-                # If it was requested an output file
-                if outen:
-                    out.write(output_rgb)
-    
-                if (disp):
-                    cv2.imshow('frame', output_rgb)
-                    key = cv2.waitKey(1) & 0xFF
-
-                if firstUsedFrame:
-                    print("Started\n")
-                    firstUsedFrame = False
+        if firstUsedFrame:
+            print("Started\n")
+            firstUsedFrame = False
                 
-                if (countWriteFrame >= dim):
-                    break
-
     print("Terminating Outflow Thread...")   
+    
+
+def terminal_thread(disp, dim, outen, output_pq, out):
+    """
+    Function to reorder the output stream
+
+    Args: 
+        disp (Bool): Flag to activate the visualization
+        dim (int): Length of the output stream
+        outen (Bool): Flag to enable the write to file
+        output_pq (Queue): Output queue for the output frames
+        out: Object to write the frames
+
+    Returns:
+        void
+    """
+    countWriteFrame = 1
+
+    tm = TimeMeas()
+    tm.start()
+
+    while (not TIME_TO_EXIT.value):
+        # If there are processed frames, otherwise block
+        try:
+            #print(f"Reading queue: {output_q.qsize()}")
+            (prior, output_frame) = output_pq.get(block=True, timeout=1)
+        except queue.Empty:
+            if (TIME_TO_EXIT.value or (countWriteFrame >= dim)):
+                # Time to exit or no more frame to process
+                break
+            else:
+                # Maybe a delay in the inflow?
+                continue
+ 
+        # Check whether it is the next (maintain the order)
+        if (prior > countWriteFrame):
+            # It is out of order, put it back
+            output_pq.put((prior, output_frame))
+        else:
+            tm.tick()
+            countWriteFrame = countWriteFrame + 1
+            output_rgb = cv2.cvtColor(output_frame, cv2.COLOR_RGB2BGR)
+            # If it was requested an output file
+            if outen:
+                out.write(output_rgb)
+            if (disp):
+                cv2.imshow('frame', output_rgb)
+                key = cv2.waitKey(1) & 0xFF
+
+    print("Terminating terminal thread")
     out_freq = tm.getfreq()
     print("Output processing rate = " + str(out_freq))
 
@@ -261,24 +296,25 @@ def start(args):
     # Define the shared data structures (Input Queues)
     input_q = Queue(maxsize=args["queue_size"])
     output_q = Queue(maxsize=args["queue_size"])
+    output_pq = queue.PriorityQueue(maxsize=3*args["queue_size"])
 
 
     path_to_graph = args["path2graph"]
     path_to_labels = args["path2labels"]
 
+    ## INPUT PROCESS
+    source = args["input_source"]
+    print("Source = " + source + "\n")
+
+    data_process = Process(target=data_flow, args=(source, input_q, output_q, output_pq))
+    data_process.start()
+    
     ## WORKING PROCESSES
     # Creates the a pool of working processes
     pool = Pool(args["num_workers"], work, \
             (input_q, output_q, path_to_graph, path_to_labels, TIME_TO_EXIT))
 
-    ## INPUT PROCESS
-    source = args["input_source"]
-    print("Source = " + source + "\n")
-
-    data_process = Process(target=data_flow, args=(source, input_q, output_q))
-    data_process.start()
-    
- 
+     
     ### MAIN LOOP
     data_process.join()
 
