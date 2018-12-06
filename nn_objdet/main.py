@@ -318,8 +318,6 @@ if __name__ == '__main__':
             help="Whether or not modified videos shall be writen")
     ap.add_argument("-op", "--output-path", type=str, default="output",
             help="Name of the output video file")
-    ap.add_argument("-I", "--input-device", type=int, default=0,
-            help="Device number input")
     ap.add_argument("-i", "--input-source", type=str, default="",
             help="Path to videos input, overwrite device input if used")
     ap.add_argument('-w', '--num-workers', dest='num_workers', type=int,
