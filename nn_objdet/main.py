@@ -8,6 +8,7 @@ import queue
 import cv2
 import os, sys
 import ctypes
+import heapq
 
 # My Library
 from classes.nn_objdetector import *
@@ -16,13 +17,13 @@ from classes.timemeas import *
 TIME_TO_EXIT = Value(ctypes.c_bool, False)
 
 #### WORKING THREAD
-def work(input_q, output_q, path2fg, path2lab, TIME_TO_EXIT):
+def work(input_q, processed_q, path2fg, path2lab, TIME_TO_EXIT):
     """
     Function for the processing of the frames
 
     Args:
         input_q (Queue): Input queue for the input frames
-        output_q (Queue): Output queue for the processed frames
+        processed_q (Queue): Output queue for the processed frames
         path2fg (Str): Path to the Frozen Graph file
         path2lab (Str): Path to the Labels file
 
@@ -57,7 +58,7 @@ def work(input_q, output_q, path2fg, path2lab, TIME_TO_EXIT):
             tm.stop()
 
             # Put it in the outqueue
-            output_q.put((frame[0], outframe))
+            processed_q.put((frame[0], outframe))
         else:
             frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
@@ -66,7 +67,7 @@ def work(input_q, output_q, path2fg, path2lab, TIME_TO_EXIT):
             tm.stop()
             tm.tick()
 
-            output_q.put(outframe)
+            processed_q.put(outframe)
 
     print(f"NN Process[{os.getpid():4}] | " + 
             f"Avg Period = {tm.getPeriod():3.6} s " +
@@ -75,21 +76,21 @@ def work(input_q, output_q, path2fg, path2lab, TIME_TO_EXIT):
     nn_od.close_session()
 
 
-def data_flow(source, input_q, output_q):
+def data_flow(source, input_q, processed_q):
     """
     Function for the processing of the data streams 
 
     Args:
         source (Str): Path to the input file
         input_q (Queue): Input queue for the input frames
-        output_q (Queue): Output queue for the processed frames
+        processed_q (Queue): Output queue for the processed frames
 
     Returns:
         (void)
 
     """   
     vs = cv2.VideoCapture(source)
-
+ 
     if (not vs.isOpened()):
         print("Problem opening the file!")
         return
@@ -114,15 +115,17 @@ def data_flow(source, input_q, output_q):
         sys.exit()
 
     p_in = Thread(target=inflow_thread, args=(input_q, vs))
+    p_out = Thread(target=outflow_thread, args=(True, nFrame, True, processed_q, out))
+    
     p_in.start()
-
-    p_out = Thread(target=outflow_thread, args=(True, nFrame, True, output_q, out))
     p_out.start()
 
     p_in.join()
+    print("Inflow thread terminated")
     p_out.join()
+    print("Outflow thread terminated")
    
-    print("Terminating Data Flow Process")
+    print("Terminating Data Flow Process...")
 
     # Cleaning up
     vs.release()
@@ -177,7 +180,8 @@ def inflow_thread(input_q, vs):
             f" | Ticks = {tm._nTicks:3}" +
             f" in {tm._elapsed:0.3} s")
 
-def outflow_thread(disp, dim, outen, output_q, out):
+
+def outflow_thread(disp, dim, outen, processed_q, out):
     """
     Function to process the input stream
 
@@ -185,18 +189,17 @@ def outflow_thread(disp, dim, outen, output_q, out):
         disp (Bool): Flag to activate the visualization
         dim (int): Length of the output stream
         outen (Bool): Flag to enable the write to file
-        output_q (Queue): Output queue for the output frames
+        processed_q (Queue): Output queue for the output frames
         out: Object to write the frames
 
     Returns:
         void
-
     """
+    countWriteFrame = 1
     firstUsedFrame = True
     firstTreatedFrame = True
-    countWriteFrame = 1
 
-    output_pq = queue.PriorityQueue(maxsize=3*args["queue_size"])
+    output_pq = []
 
     print("Outflow Thread started!\n")
 
@@ -204,46 +207,56 @@ def outflow_thread(disp, dim, outen, output_q, out):
     tm.start()
     while (not TIME_TO_EXIT.value):
         # If there are processed frames, otherwise block
-        outframe = output_q.get(block=True, timeout=None)
-        #print("Output queue = " + str(output_q.qsize()))
-        output_pq.put(outframe)
+        try:
+            #print(f"Reading queue: {processed_q.qsize()}")
+            (prior, outframe) = processed_q.get(block=True, timeout=1)
+        except queue.Empty:
+            if ((countWriteFrame <= dim) and (not TIME_TO_EXIT.value)):
+                continue
+            else:
+                # No more frames either something got stuck 
+                break
+            
+        # Extract the next element
+        (prior, outframe) = heapq.heappushpop(output_pq, (prior, outframe))
+        if (prior > countWriteFrame):
+            heapq.heappush(output_pq, (prior, outframe))
+            continue
 
+        # Start putting the frames in the output file
+        while (prior == countWriteFrame):
+            tm.tick()
+            output_rgb = cv2.cvtColor(outframe, cv2.COLOR_RGB2BGR)
+            # If it was requested an output file
+            if outen:
+                out.write(output_rgb)
+            # If it was requested video output
+            if (disp):
+                cv2.imshow('frame', output_rgb)
+                key = cv2.waitKey(1) & 0xFF
+
+            countWriteFrame = countWriteFrame + 1
+
+            try:
+                (prior, outframe) = heapq.heappop(output_pq)
+            except IndexError:
+                break
+
+            if (prior > countWriteFrame):
+                heapq.heappush(output_pq, (prior, outframe))
+            
         if firstTreatedFrame:
             print("Retrieving processed data...\n")
             firstTreatedFrame = False
 
-        # Check the priority queue
-        if not output_pq.empty():
-            # Extract the first tuple
-            (prior, output_frame) = output_pq.get()
-            # Check whether it is the next (maintain the order)
-            if (prior > countWriteFrame):
-                # It is out of order, put it back
-                output_pq.put((prior, output_frame))
-            else:
-                tm.tick()
-
-                countWriteFrame = countWriteFrame + 1
-                output_rgb = cv2.cvtColor(output_frame, cv2.COLOR_RGB2BGR)
-
-                # If it was requested an output file
-                if outen:
-                    out.write(output_rgb)
-    
-                if (disp):
-                    cv2.imshow('frame', output_rgb)
-                    key = cv2.waitKey(1) & 0xFF
-
-                if firstUsedFrame:
-                    print("Started\n")
-                    firstUsedFrame = False
+        if firstUsedFrame:
+            print("Started\n")
+            firstUsedFrame = False
                 
-                if (countWriteFrame >= dim):
-                    break
-
     print("Terminating Outflow Thread...")   
     out_freq = tm.getfreq()
-    print("Output processing rate = " + str(out_freq))
+    print(f"Output processing rate = {out_freq:3.2} Hz")
+
 
 #### START
 def start(args):
@@ -260,25 +273,24 @@ def start(args):
     ## DATA STRUCTURES
     # Define the shared data structures (Input Queues)
     input_q = Queue(maxsize=args["queue_size"])
-    output_q = Queue(maxsize=args["queue_size"])
-
+    processed_q = Queue(maxsize=args["queue_size"])
 
     path_to_graph = args["path2graph"]
     path_to_labels = args["path2labels"]
-
-    ## WORKING PROCESSES
-    # Creates the a pool of working processes
-    pool = Pool(args["num_workers"], work, \
-            (input_q, output_q, path_to_graph, path_to_labels, TIME_TO_EXIT))
 
     ## INPUT PROCESS
     source = args["input_source"]
     print("Source = " + source + "\n")
 
-    data_process = Process(target=data_flow, args=(source, input_q, output_q))
+    data_process = Process(target=data_flow, args=(source, input_q, processed_q))
     data_process.start()
     
- 
+    ## WORKING PROCESSES
+    # Creates the a pool of working processes
+    pool = Pool(args["num_workers"], work, \
+            (input_q, processed_q, path_to_graph, path_to_labels, TIME_TO_EXIT))
+
+     
     ### MAIN LOOP
     data_process.join()
 
