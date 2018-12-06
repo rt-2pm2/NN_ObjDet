@@ -92,6 +92,7 @@ def data_flow(source, input_q, output_q):
 
     if (not vs.isOpened()):
         print("Problem opening the file!")
+        return
     else:
         print("Loaded file with " + \
                 str(int(vs.get(cv2.CAP_PROP_FRAME_COUNT))) + " frames")
