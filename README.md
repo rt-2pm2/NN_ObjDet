@@ -13,7 +13,7 @@ pip install -r requirements.txt
 > python3 ./nn_objdet/main.py [args] 
 
 List of arguments are (with default value []):
-
+```
 "-d", "--display", [0] Whether or not frames should be displayed
 "-o", "--output", [0] Whether or not modified videos shall be writen
 "-op", "--output-path", ["./output"] Name of the output video file
@@ -23,7 +23,7 @@ List of arguments are (with default value []):
 '-l', '--logger-debug', [0], Print logger debug
 "-pg", "--graph_path",["./model"] Path to the frozen graph
 "-pl", "--label_path", ["./model"],Path to the object labels
-
+```
 Work in progress...
 
 # Application structure
