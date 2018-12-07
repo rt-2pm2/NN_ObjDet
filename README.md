@@ -35,6 +35,8 @@ Due to the GIL problem under python, CPU bound activities won't get the expected
 
 The structure of the application is shown in the following Figure.
 
+Work in progress...
+
 ![alt text](https://github.com/rt-2pm2/NN_ObjDet/blob/master/doc/app_scheme.gif)
 
 
