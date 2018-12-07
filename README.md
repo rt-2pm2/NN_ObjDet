@@ -27,10 +27,16 @@ List of arguments are (with default value []):
 Work in progress...
 
 # Application structure
+The aim is to take advantage of the concurrent execution to speed up the object detection routine. 
+
+I still have to check the assumption, but the idea is that the data flow is more I/O bound, whilst the NN jobs are CPU bound.
+
+Due to the GIL problem under python, CPU bound activities won't get the expected speed up if managed with multithreading. A possible solution is to deploy the routines in separate processes, with separate memory spaces, to avoid the GIL issue. 
+
 The structure of the application is shown in the following Figure.
+
 ![alt text](https://github.com/rt-2pm2/NN_ObjDet/blob/master/doc/app_scheme.gif)
 
-The aim is to take advantage of the concurrent execution to speed up the object detection routine. I still have to check the assumption, but the idea is that the data flow is more I/O bound, whilst the NN jobs are CPU bound.
-Due to the GIL problem under python, CPU bound activities won't get the expected speed up if managed with multithreading. A possible solution is to deploy the routines in separate processes, with separate memory spaces, to avoid the GIL issue. 
+
 
 
